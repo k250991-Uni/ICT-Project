@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Budget Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+  
+  body { font-family: sans-serif; margin: 0; background: #f4f4f4; padding: 20px; }
+  .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+  h1 { text-align: center; margin-bottom: 10px; }
+  
+  .row { display: flex; gap: 20px; }
+  .col-left { flex: 2; }
+  .col-right { flex: 1; }
+  @media (max-width: 768px) { .row { flex-direction: column; } }
+
+  input, select { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+  button { padding: 10px; background: #008cba; color: white; border: none; border-radius: 4px; cursor: pointer; }
+  button:hover { opacity: 0.9; }
+  .delete-btn { background: #f44336; padding: 5px 10px; margin-left: 5px; }
+  
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
+  
+  .summary-box { display: flex; justify-content: space-between; margin-top: 20px; text-align: center; }
+  .box { background: #eef; padding: 10px; border-radius: 5px; width: 30%; }
+  
+  /* Budget Bar (Now Full Width) */
+  .budget-section { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #fffcf5; }
+  .progress-bar-bg { background: #ddd; height: 25px; border-radius: 12px; margin-top: 5px; }
+  .progress-bar-fill { height: 100%; background: green; width: 0%; border-radius: 12px; transition: 0.3s; }
+
+  /* Tip Box */
+  .tip-box {
+    background-color: #e0f7fa;
+    border: 1px solid #b2ebf2;
+    color: #006064;
+    padding: 10px;
+    border-radius: 5px;
+    text-align: center;
+    margin-bottom: 15px; 
+  }
+</style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Budget Tracker</h1>
+
+    <div class="tip-box">
+        <strong>Daily Tip:</strong> <span id="tipText">Loading...</span>
+    </div>
+
+    <div class="budget-section">
+        <div style="display:flex; justify-content:space-between; font-weight:bold;">
+            <span>Budget Limit: <span id="limitLabel">0</span></span>
+            <span id="budgetMsg">0% used</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div id="progressBar" class="progress-bar-fill"></div>
+        </div>
+    </div>
+    
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <h3 id="monthLabel"></h3>
+        <div>
+            <button onclick="changeMonth(-1)">Prev</button>
+            <button onclick="changeMonth(1)">Next</button>
+            <button onclick="askForCurrency()" style="background:#555;">Currency</button>
+            <button onclick="resetData()" style="background:orange;">Reset</button>
+        </div>
+    </div>
+
+    <div class="row">
+      <div class="col-left">
+        <div style="background:#fafafa; padding:15px; border-radius:5px;">
+            
+            <label>Action Type</label>
+            <select id="inputType">
+                <option value="expense">Add Expense</option>
+                <option value="budget">Set Budget</option>
+            </select>
+
+            <label>Category (Ignore if setting budget)</label>
+            <select id="inputCategory">
+                </select>
+
+            <label>Amount</label>
+            <input type="number" id="inputAmount" placeholder="0.00">
+
+            <label>Date</label>
+            <input type="date" id="inputDate">
+
+            <label>Description</label>
+            <input type="text" id="inputDesc" placeholder="What is this for?">
+
+            <button onclick="handleFormSubmit()">Submit</button>
+        </div>
+
+        <h3>Recent Expenses</h3>
+        <div style="height:300px; overflow-y:scroll;">
+            <table id="txTable">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Category</th>
+                        <th>Desc</th>
+                        <th>Amount</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    </tbody>
+            </table>
+        </div>
+
+        <div class="summary-box">
+            <div class="box">
+                <div>My Budget</div>
+                <h3 id="showBudget" style="color:blue">0</h3>
+            </div>
+            <div class="box">
+                <div>Spent</div>
+                <h3 id="showExpense" style="color:red">0</h3>
+            </div>
+            <div class="box">
+                <div>Remaining</div>
+                <h3 id="showRemaining">0</h3>
+            </div>
+        </div>
+      </div>
+
+      <div class="col-right">
+        <canvas id="myPieChart"></canvas>
+        <br><br>
+        <canvas id="myBarChart"></canvas>
+        
+        <br>
+        <hr>
+        <h3>Add Category</h3>
+        <input type="text" id="newCatName" placeholder="New Category Name">
+        <button onclick="addNewCategory()">Add</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+    // --- VARIABLES ---
+    var transactions = [];
+    var categories = ["Food", "Transport", "Entertainment", "Bills", "Shopping", "Other"];
+    
+    var budgetLimit = 0; 
+    var currencySymbol = "$"; 
+    
+    var currentDate = new Date();
+    var currentMonth = currentDate.getMonth(); 
+    var currentYear = currentDate.getFullYear();
+
+    // --- ON LOAD ---
+    window.onload = function() {
+        loadData();
+        
+        if (budgetLimit === 0) {
+            // First time? Ask for currency only, budget can be set via form now
+            askForCurrency();
+        }
+
+        updateCategoryDropdown();
+        document.getElementById('inputDate').valueAsDate = new Date();
+        showRandomTip();
+        renderAll();
+    };
+
+    function askForCurrency() {
+        var newCurr = prompt("Enter currency symbol (e.g. $, Rs, £):", currencySymbol);
+        if (newCurr != null && newCurr != "") {
+            currencySymbol = newCurr;
+            saveData();
+            renderAll();
+        }
+    }
+
+    // --- TIP FUNCTION ---
+    function showRandomTip() {
+        var tips = [
+            "Try to save at least 20% of your income.",
+            "Bring your own lunch to save money.",
+            "Wait 24 hours before making a big purchase.",
+            "Track every dollar, even small snacks!",
+            "Review your subscriptions monthly."
+        ];
+        var randomIndex = Math.floor(Math.random() * tips.length);
+        document.getElementById("tipText").innerText = tips[randomIndex];
+    }
+
+    // --- DATA HANDLING ---
+    function loadData() {
+        var storedTx = localStorage.getItem("myTransactions");
+        if (storedTx) transactions = JSON.parse(storedTx);
+
+        var storedCats = localStorage.getItem("myCategories");
+        if (storedCats) categories = JSON.parse(storedCats);
+
+        var storedLimit = localStorage.getItem("myBudgetLimit");
+        if (storedLimit) budgetLimit = parseInt(storedLimit);
+
+        var storedCurr = localStorage.getItem("myCurrency");
+        if (storedCurr) currencySymbol = storedCurr;
+    }
+
+    function saveData() {
+        localStorage.setItem("myTransactions", JSON.stringify(transactions));
+        localStorage.setItem("myCategories", JSON.stringify(categories));
+        localStorage.setItem("myBudgetLimit", budgetLimit);
+        localStorage.setItem("myCurrency", currencySymbol);
+    }
+
+    // --- CORE FUNCTIONS ---
+    
+    // CHANGED: This function now decides if we are Adding Expense OR Setting Budget
+    function handleFormSubmit() {
+        var type = document.getElementById("inputType").value;
+        var amt = document.getElementById("inputAmount").value;
+
+        if (amt == "") {
+            alert("Please enter an amount!");
+            return;
+        }
+
+        // LOGIC FOR BUDGET
+        if (type == "budget") {
+            budgetLimit = parseFloat(amt);
+            saveData();
+            renderAll();
+            alert("Budget limit updated!");
+            document.getElementById("inputAmount").value = "";
+            return; // Stop here, don't add to list
+        }
+
+        // LOGIC FOR EXPENSE (Existing code)
+        var cat = document.getElementById("inputCategory").value;
+        var date = document.getElementById("inputDate").value;
+        var desc = document.getElementById("inputDesc").value;
+
+        if (date == "") {
+            alert("Please enter a date!");
+            return;
+        }
+
+        var newId = Math.floor(Math.random() * 1000000);
+        var tx = {
+            id: newId,
+            category: cat,
+            amount: parseFloat(amt),
+            date: date,
+            desc: desc
+        };
+
+        transactions.push(tx);
+        saveData();
+        renderAll();
+        
+        document.getElementById("inputAmount").value = "";
+        document.getElementById("inputDesc").value = "";
+    }
+
+    function deleteTransaction(id) {
+        if(confirm("Are you sure?")) {
+            for (var i = 0; i < transactions.length; i++) {
+                if (transactions[i].id == id) {
+                    transactions.splice(i, 1);
+                    break;
+                }
+            }
+            saveData();
+            renderAll();
+        }
+    }
+
+    function addNewCategory() {
+        var name = document.getElementById("newCatName").value;
+        if (name != "") {
+            categories.push(name);
+            saveData();
+            updateCategoryDropdown();
+            document.getElementById("newCatName").value = "";
+        }
+    }
+
+    // --- RENDERING ---
+    function renderAll() {
+        updateMonthLabel();
+        
+        var monthTx = [];
+        var totalExpense = 0;
+
+        for (var i = 0; i < transactions.length; i++) {
+            var t = transactions[i];
+            var d = new Date(t.date);
+            
+            if (d.getMonth() == currentMonth && d.getFullYear() == currentYear) {
+                monthTx.push(t);
+                totalExpense += t.amount;
+            }
+        }
+
+        var remaining = budgetLimit - totalExpense;
+
+        document.getElementById("showBudget").innerText = currencySymbol + " " + budgetLimit;
+        document.getElementById("showExpense").innerText = currencySymbol + " " + totalExpense;
+        document.getElementById("showRemaining").innerText = currencySymbol + " " + remaining;
+
+        if(remaining < 0) {
+            document.getElementById("showRemaining").style.color = "red";
+        } else {
+            document.getElementById("showRemaining").style.color = "green";
+        }
+
+        var tbody = document.getElementById("tableBody");
+        tbody.innerHTML = "";
+
+        for (var i = 0; i < monthTx.length; i++) {
+            var t = monthTx[i];
+            var row = "<tr>" +
+                "<td>" + t.date + "</td>" +
+                "<td>" + t.category + "</td>" +
+                "<td>" + t.desc + "</td>" +
+                "<td style='color:red'>" + currencySymbol + " " + t.amount + "</td>" +
+                "<td><button class='delete-btn' onclick='deleteTransaction(" + t.id + ")'>X</button></td>" +
+                "</tr>";
+            tbody.innerHTML += row;
+        }
+
+        // Update Budget Bar
+        document.getElementById("limitLabel").innerText = currencySymbol + " " + budgetLimit;
+        
+        var percentage = 0;
+        if(budgetLimit > 0) {
+            percentage = (totalExpense / budgetLimit) * 100;
+        }
+
+        var bar = document.getElementById("progressBar");
+        if (percentage > 100) percentage = 100;
+        bar.style.width = percentage + "%";
+        document.getElementById("budgetMsg").innerText = Math.round(percentage) + "% used";
+
+        if (percentage < 50) bar.style.background = "green";
+        else if (percentage < 90) bar.style.background = "orange";
+        else bar.style.background = "red";
+
+        drawPieChart(monthTx);
+        drawBarChart(totalExpense);
+    }
+
+    function updateCategoryDropdown() {
+        var select = document.getElementById("inputCategory");
+        select.innerHTML = "";
+        for (var i = 0; i < categories.length; i++) {
+            select.innerHTML += "<option>" + categories[i] + "</option>";
+        }
+    }
+
+    function updateMonthLabel() {
+        var monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        document.getElementById("monthLabel").innerText = monthNames[currentMonth] + " " + currentYear;
+    }
+
+    function changeMonth(direction) {
+        currentMonth += direction;
+        if (currentMonth > 11) { currentMonth = 0; currentYear++; } 
+        else if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+        renderAll();
+    }
+
+    function resetData() {
+        if(confirm("Delete everything?")) {
+            localStorage.clear();
+            location.reload();
+        }
+    }
+
+    // --- CHART FUNCTIONS ---
+    var pieChartInstance = null;
+    var barChartInstance = null;
+
+    function drawPieChart(monthTx) {
+        var ctx = document.getElementById('myPieChart').getContext('2d');
+        var catTotals = {};
+        for (var i = 0; i < categories.length; i++) { catTotals[categories[i]] = 0; }
+        
+        for (var i = 0; i < monthTx.length; i++) {
+            catTotals[monthTx[i].category] += monthTx[i].amount;
+        }
+        
+        var labels = [];
+        var data = [];
+        for (var key in catTotals) {
+            if (catTotals[key] > 0) { labels.push(key); data.push(catTotals[key]); }
+        }
+
+        if (pieChartInstance) pieChartInstance.destroy();
+
+        pieChartInstance = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: ['red', 'blue', 'orange', 'green', 'purple', 'gray']
+                }]
+            }
+        });
+    }
+
+    function drawBarChart(totalExpense) {
+        var ctx = document.getElementById('myBarChart').getContext('2d');
+        if (barChartInstance) barChartInstance.destroy();
+        
+        barChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Budget', 'Spent'],
+                datasets: [{
+                    label: 'This Month',
+                    data: [budgetLimit, totalExpense],
+                    backgroundColor: ['blue', 'red']
+                }]
+            },
+            options: { scales: { y: { beginAtZero: true } } }
+        });
+    }
+</script>
+</body>
+</html>
